@@ -43,15 +43,309 @@ def extract_content_simple(url):
         return "Test content for JSON extraction methods testing."
 
 def setup_driver():
-    """Setup Chrome driver"""
-    options = Options()
-    options.add_argument('--headless=new')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+    """Setup Chrome driver with better error handling"""
+    try:
+        options = Options()
+        options.add_argument('--headless=new')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-web-security')
+        options.add_argument('--disable-features=VizDisplayCompositor')
+        options.add_argument('--single-process')
+        options.add_argument('--window-size=1280,720')
+        options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+        
+        driver = webdriver.Chrome(options=options)
+        driver.set_page_load_timeout(60)
+        driver.implicitly_wait(15)
+        return driver
+    except Exception as e:
+        st.error(f"Driver setup failed: {e}")
+        return None
+
+def test_extraction_methods_workflow(url):
+    """Simplified workflow with better error handling"""
     
-    return webdriver.Chrome(options=options)
+    # Extract content
+    with st.spinner("Extracting content..."):
+        content = extract_content_simple(url)
+    
+    st.success(f"Content ready: {len(content)} characters")
+    
+    # Setup driver
+    driver = setup_driver()
+    if not driver:
+        return
+    
+    try:
+        st.info("🌐 Navigating to chunk.dejan.ai...")
+        driver.get("https://chunk.dejan.ai/")
+        
+        # Wait longer for Streamlit app to load
+        st.info("⏳ Waiting for page to load...")
+        time.sleep(10)
+        
+        # Try to find input field with extended timeout
+        st.info("📝 Looking for input field...")
+        wait = WebDriverWait(driver, 60)
+        
+        try:
+            input_field = wait.until(EC.presence_of_element_located((By.ID, "text_area_1")))
+            st.success("✅ Input field found!")
+        except TimeoutException:
+            st.error("❌ Input field not found - chunk.dejan.ai might be loading slowly")
+            
+            # Try alternative selectors
+            st.info("🔍 Trying alternative selectors...")
+            alternative_selectors = [
+                'textarea[aria-label*="chunk"]',
+                'textarea',
+                '[data-testid*="text"]'
+            ]
+            
+            input_field = None
+            for selector in alternative_selectors:
+                try:
+                    input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
+                    st.success(f"✅ Found input with selector: {selector}")
+                    break
+                except:
+                    continue
+            
+            if not input_field:
+                st.error("❌ Could not find any input field")
+                return
+        
+        # Fill the form
+        st.info("✏️ Filling content...")
+        input_field.clear()
+        input_field.send_keys(content[:1000])  # Shorter content for faster testing
+        
+        # Find submit button
+        st.info("🔍 Looking for submit button...")
+        try:
+            submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
+            st.success("✅ Submit button found!")
+        except TimeoutException:
+            st.error("❌ Submit button not found")
+            
+            # Try alternative button selectors
+            button_selectors = [
+                'button[kind="secondary"]',
+                'button:contains("Generate")',
+                'button'
+            ]
+            
+            submit_button = None
+            for selector in button_selectors:
+                try:
+                    submit_button = driver.find_element(By.CSS_SELECTOR, selector)
+                    if submit_button and submit_button.is_enabled():
+                        st.success(f"✅ Found button with selector: {selector}")
+                        break
+                except:
+                    continue
+            
+            if not submit_button:
+                st.error("❌ No clickable button found")
+                return
+        
+        # Click submit
+        st.info("🚀 Clicking submit...")
+        submit_button.click()
+        
+        # Simple wait approach - just wait 30 seconds
+        st.info("⏳ Waiting 30 seconds for processing...")
+        time.sleep(30)
+        
+        # Now test extraction methods
+        st.info("🧪 Testing extraction methods...")
+        methods = test_simple_extraction_methods(driver)
+        
+        # Show results
+        display_extraction_results(methods)
+        
+    except Exception as e:
+        st.error(f"❌ Test failed: {e}")
+        st.error("This might be due to chunk.dejan.ai being slow or temporarily unavailable")
+    
+    finally:
+        if driver:
+            driver.quit()
+
+def test_simple_extraction_methods(driver):
+    """Simplified extraction testing"""
+    methods = {}
+    
+    # Look for copy button
+    st.write("🔍 Looking for copy button...")
+    copy_buttons = driver.find_elements(By.CSS_SELECTOR, '[data-testid="stCodeCopyButton"]')
+    
+    if not copy_buttons:
+        st.warning("⚠️ No copy button found - trying alternative selectors...")
+        # Try other possible selectors
+        alternative_selectors = [
+            'button[title*="copy"]',
+            'button[title*="Copy"]', 
+            '[data-clipboard-text]',
+            'button[data-testid*="copy"]'
+        ]
+        
+        for selector in alternative_selectors:
+            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+            if elements:
+                copy_buttons = elements
+                st.info(f"Found copy elements with: {selector}")
+                break
+    
+    if not copy_buttons:
+        st.error("❌ No copy button found at all")
+        return {'error': 'No copy button found'}
+    
+    copy_button = copy_buttons[0]
+    st.success(f"✅ Found copy button: {copy_button.tag_name}")
+    
+    # Test Method 1: data-clipboard-text attribute
+    st.write("**Method 1: data-clipboard-text attribute**")
+    try:
+        raw_content = copy_button.get_attribute('data-clipboard-text')
+        if raw_content:
+            decoded = html.unescape(raw_content)
+            methods['Method 1'] = {
+                'length': len(decoded),
+                'preview': decoded[:200],
+                'valid_json': is_valid_json(decoded),
+                'full_content': decoded
+            }
+            st.write(f"   ✅ Found {len(decoded)} characters")
+        else:
+            methods['Method 1'] = {'error': 'No content in data-clipboard-text'}
+            st.write("   ❌ No content found")
+    except Exception as e:
+        methods['Method 1'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    # Test Method 2: All attributes
+    st.write("**Method 2: Check all attributes**")
+    try:
+        all_attributes = {}
+        # Get all attributes
+        attrs = driver.execute_script("return arguments[0].attributes;", copy_button)
+        for i in range(attrs['length']):
+            attr = attrs[str(i)]
+            if attr:
+                name = attr.get('name', '')
+                value = copy_button.get_attribute(name)
+                if value and len(value) > 50:
+                    all_attributes[name] = len(value)
+        
+        methods['Method 2'] = {'attributes': all_attributes}
+        st.write(f"   Attributes with content: {all_attributes}")
+        
+        # Use the longest one
+        if all_attributes:
+            best_attr = max(all_attributes.keys(), key=lambda k: all_attributes[k])
+            content = copy_button.get_attribute(best_attr)
+            if 'clipboard' in best_attr:
+                content = html.unescape(content)
+            
+            methods['Method 2'].update({
+                'best_attribute': best_attr,
+                'length': len(content),
+                'valid_json': is_valid_json(content),
+                'full_content': content
+            })
+            
+    except Exception as e:
+        methods['Method 2'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    # Test Method 3: JavaScript approach
+    st.write("**Method 3: JavaScript extraction**")
+    try:
+        js_result = driver.execute_script("""
+            var button = document.querySelector('[data-testid="stCodeCopyButton"]');
+            if (!button) button = document.querySelector('[data-clipboard-text]');
+            if (button) {
+                return button.getAttribute('data-clipboard-text');
+            }
+            return null;
+        """)
+        
+        if js_result:
+            decoded = html.unescape(js_result)
+            methods['Method 3'] = {
+                'length': len(decoded),
+                'valid_json': is_valid_json(decoded),
+                'full_content': decoded
+            }
+            st.write(f"   ✅ Found {len(decoded)} characters")
+        else:
+            methods['Method 3'] = {'error': 'JavaScript returned null'}
+            st.write("   ❌ JavaScript returned null")
+            
+    except Exception as e:
+        methods['Method 3'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    return methods
+
+def display_extraction_results(methods):
+    """Display results of extraction testing"""
+    st.write("\n📊 **EXTRACTION RESULTS**")
+    st.write("=" * 50)
+    
+    if 'error' in methods:
+        st.error(f"❌ {methods['error']}")
+        return
+    
+    # Find working methods
+    working_methods = {}
+    for method_name, result in methods.items():
+        if isinstance(result, dict) and 'full_content' in result and result.get('valid_json', False):
+            working_methods[method_name] = result
+    
+    if working_methods:
+        st.success(f"✅ Found {len(working_methods)} working method(s)!")
+        
+        # Show comparison
+        for method_name, result in working_methods.items():
+            st.write(f"**{method_name}**: {result['length']} characters, Valid JSON: ✅")
+        
+        # Show the best one
+        best_method = max(working_methods.keys(), key=lambda k: working_methods[k]['length'])
+        best_result = working_methods[best_method]
+        
+        st.success(f"🎯 **BEST METHOD: {best_method}** ({best_result['length']} characters)")
+        
+        # Show preview
+        st.write("📋 **Content Preview:**")
+        preview = best_result['full_content'][:300] + "..." if len(best_result['full_content']) > 300 else best_result['full_content']
+        st.code(preview, language='json')
+        
+        # Download option
+        st.download_button(
+            "💾 Download Complete JSON",
+            best_result['full_content'],
+            f"complete_json_{int(time.time())}.json",
+            "application/json"
+        )
+        
+    else:
+        st.error("❌ No working extraction methods found")
+        
+        # Show debug info
+        st.write("🔍 **Debug Information:**")
+        for method_name, result in methods.items():
+            if isinstance(result, dict):
+                if 'error' in result:
+                    st.write(f"   {method_name}: ❌ {result['error']}")
+                elif 'length' in result:
+                    valid = "✅" if result.get('valid_json', False) else "❌"
+                    st.write(f"   {method_name}: {result['length']} chars, Valid: {valid}")
+                else:
+                    st.write(f"   {method_name}: {result}")
 
 def wait_for_processing_simple(driver):
     """Wait for processing with simple 4-fetch detection + 1 second"""
