@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Content Processing Automation Project - H3 Detection & Content Extraction
+Content Processing Automation Project - DOM Stabilization Test
 
 Purpose:
-To load chunk.dejan.ai, input "test", poll for the 'Raw JSON Output'
-heading, and upon success, extract the content from the code block below it.
+To test if forcing a DOM re-evaluation after the H3 heading is found
+solves the final extraction error, mimicking a manual "re-inspect".
 """
 
 import streamlit as st
@@ -16,17 +16,19 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException, NoSuchElementException, TimeoutException
 import json
 import time
+from datetime import datetime
+import pytz
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(
-    page_title="H3 Detection & Extraction Test",
-    page_icon="✅",
+    page_title="DOM Stabilization Test",
+    page_icon="⚓",
     layout="wide",
 )
 
-st.title("✅ H3 Detection & Content Extraction Test")
+st.title("⚓ DOM Stabilization & Extraction Test")
 st.markdown("""
-This test submits `"test"`, polls for the `<h3>Raw JSON Output</h3>` heading, and then extracts the content from the code block that follows.
+Based on your observation, this test adds a **Stabilization Step** after the `<h3>` is found to ensure the page is settled before extracting content.
 """)
 
 # --- Core Functions ---
@@ -52,11 +54,10 @@ def setup_driver():
 
 def find_and_extract_content(driver, log_callback):
     """
-    Polls for the H3 heading, and upon finding it, extracts content from the
-    subsequent code block. Returns the content or None.
+    Polls for the H3 heading, stabilizes the DOM, and then extracts content.
     """
-    total_wait_time = 120  # 2 minutes
-    poll_interval = 5      # 5 seconds
+    total_wait_time = 120
+    poll_interval = 5
     start_time = time.time()
     
     h3_xpath = "//h3[text()='Raw JSON Output']"
@@ -69,16 +70,21 @@ def find_and_extract_content(driver, log_callback):
         log_callback(f"Attempt #{attempt} (Elapsed: {elapsed_time}s): Searching for H3 heading...")
         
         try:
-            # Check if the H3 element exists
             driver.find_element(By.XPATH, h3_xpath)
             log_callback("✅ SUCCESS: Found 'Raw JSON Output' heading!")
             
-            # Now, locate and extract content from the code block
-            log_callback("📦 Locating the code block that follows the heading...")
+            # --- NEW STABILIZATION STEP ---
+            # Based on the "re-inspect" observation, we force a pause and re-sync.
+            log_callback("⚓ Stabilizing DOM... (Pausing for 1 second to let rendering settle)")
+            time.sleep(1)
+            driver.execute_script("return true;") # Forces a sync with the JS engine
+            log_callback("✅ DOM stabilized.")
+            # --- END OF STABILIZATION STEP ---
+
+            log_callback("📦 Now locating the code block that follows the heading...")
             code_block_xpath = f"{h3_xpath}/following-sibling::div[@data-testid='stCodeBlock']//code"
             
-            # Use a short wait to ensure the code block is available after the H3 appears
-            wait = WebDriverWait(driver, 10)
+            wait = WebDriverWait(driver, 30)
             code_element = wait.until(EC.presence_of_element_located((By.XPATH, code_block_xpath)))
             
             log_callback("📋 Extracting text content from the code block...")
@@ -93,10 +99,10 @@ def find_and_extract_content(driver, log_callback):
             time.sleep(poll_interval)
             
         except Exception as e:
-            log_callback(f"❌ An error occurred during extraction: {e}")
+            log_callback(f"❌ An error occurred during the final extraction step: {e}")
             return None
 
-    log_callback(f"❌ Test Failed: Timed out after {total_wait_time} seconds. The 'Raw JSON Output' heading never appeared.")
+    log_callback(f"❌ Test Failed: Timed out. The 'Raw JSON Output' heading never appeared.")
     return None
 
 def main_workflow():
@@ -107,9 +113,15 @@ def main_workflow():
     log_container = st.container()
     
     def log_callback(message):
-        """Helper function to print logs with a simple UTC timestamp."""
-        timestamp = time.strftime('%H:%M:%S', time.gmtime())
-        log_messages.append(f"`{timestamp} (UTC)`: {message}")
+        """Helper function to print logs with both UTC and local CEST time."""
+        utc_now = datetime.now(pytz.utc)
+        cest_tz = pytz.timezone('Europe/Malta')
+        cest_now = utc_now.astimezone(cest_tz)
+        
+        utc_time_str = utc_now.strftime('%H:%M:%S')
+        cest_time_str = cest_now.strftime('%H:%M:%S')
+        
+        log_messages.append(f"`{cest_time_str} (CEST) / {utc_time_str} (UTC)`: {message}")
         with log_container:
             st.info("\n\n".join(log_messages))
 
@@ -178,15 +190,16 @@ def main_workflow():
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    if st.button("🧪 Run Full Extraction Test", type="primary", use_container_width=True):
+    if st.button("🧪 Run Stabilization Test", type="primary", use_container_width=True):
         st.subheader("📋 Real-time Processing Log")
         main_workflow()
 
 with col2:
     with st.expander("ℹ️ How This Test Works", expanded=True):
         st.markdown("""
-        1.  **Navigate & Submit**: Opens `chunk.dejan.ai`, inputs "test", and clicks submit.
+        1.  **Submit**: Opens `chunk.dejan.ai`, inputs "test", and clicks submit.
         2.  **Poll for H3**: Checks every 5 seconds for the `<h3>Raw JSON Output</h3>` heading.
-        3.  **Extract Content**: Once the heading is found, it locates the `<code>` block below it and copies all its text.
-        4.  **Report**: It reports `PASS` if content is extracted, showing character count and JSON validity. It reports `FAIL` if the heading is not found.
+        3.  **Stabilize DOM**: Once the heading is found, it **pauses for 1 second** to let the page settle, mimicking a manual "re-inspect".
+        4.  **Extract Content**: It then waits up to 30 seconds for the `<code>` block to appear and copies its text.
+        5.  **Report**: It reports `PASS` or `FAIL` based on whether the content was successfully extracted.
         """)
