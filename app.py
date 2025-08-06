@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Content Processing Automation Project - H3 Detection After Minimal Input (Corrected)
+Content Processing Automation Project - H3 Detection & Content Extraction
 
 Purpose:
-To load chunk.dejan.ai, input the simple string "test", click submit,
-and then check if the 'Raw JSON Output' heading appears as a result.
-This version fixes a SyntaxError and adds local timezone logging.
+To load chunk.dejan.ai, input "test", poll for the 'Raw JSON Output'
+heading, and upon success, extract the content from the code block below it.
 """
 
 import streamlit as st
@@ -15,21 +14,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException, NoSuchElementException, TimeoutException
+import json
 import time
-from datetime import datetime
-import pytz # A library to handle timezones
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(
-    page_title="H3 Detection After 'test' Input",
-    page_icon="🧪",
+    page_title="H3 Detection & Extraction Test",
+    page_icon="✅",
     layout="wide",
 )
 
-st.title("🧪 H3 Detection After Inputting 'test'")
+st.title("✅ H3 Detection & Content Extraction Test")
 st.markdown("""
-This test checks if submitting a minimal input (`"test"`) causes the `<h3>Raw JSON Output</h3>` heading to appear.
-It will poll for the heading every 5 seconds after clicking the submit button.
+This test submits `"test"`, polls for the `<h3>Raw JSON Output</h3>` heading, and then extracts the content from the code block that follows.
 """)
 
 # --- Core Functions ---
@@ -53,9 +50,10 @@ def setup_driver():
         st.error(f"❌ WebDriver Initialization Failed: {e}")
         return None
 
-def check_for_h3_with_polling(driver, log_callback):
+def find_and_extract_content(driver, log_callback):
     """
-    Checks for the H3 heading every 5 seconds for a total of 2 minutes.
+    Polls for the H3 heading, and upon finding it, extracts content from the
+    subsequent code block. Returns the content or None.
     """
     total_wait_time = 120  # 2 minutes
     poll_interval = 5      # 5 seconds
@@ -71,39 +69,47 @@ def check_for_h3_with_polling(driver, log_callback):
         log_callback(f"Attempt #{attempt} (Elapsed: {elapsed_time}s): Searching for H3 heading...")
         
         try:
+            # Check if the H3 element exists
             driver.find_element(By.XPATH, h3_xpath)
             log_callback("✅ SUCCESS: Found 'Raw JSON Output' heading!")
-            return True
+            
+            # Now, locate and extract content from the code block
+            log_callback("📦 Locating the code block that follows the heading...")
+            code_block_xpath = f"{h3_xpath}/following-sibling::div[@data-testid='stCodeBlock']//code"
+            
+            # Use a short wait to ensure the code block is available after the H3 appears
+            wait = WebDriverWait(driver, 10)
+            code_element = wait.until(EC.presence_of_element_located((By.XPATH, code_block_xpath)))
+            
+            log_callback("📋 Extracting text content from the code block...")
+            json_content = code_element.get_attribute('textContent')
+            
+            log_callback(f"✅ Extraction complete. Retrieved {len(json_content):,} characters.")
+            return json_content
 
         except NoSuchElementException:
-            log_callback(f"Attempt #{attempt}: Heading not found. Will try again in {poll_interval} seconds.")
+            log_callback(f"Attempt #{attempt}: Heading not found yet. Will try again in {poll_interval} seconds.")
             attempt += 1
             time.sleep(poll_interval)
             
         except Exception as e:
-            log_callback(f"❌ An unexpected error occurred during polling: {e}")
-            return False
+            log_callback(f"❌ An error occurred during extraction: {e}")
+            return None
 
     log_callback(f"❌ Test Failed: Timed out after {total_wait_time} seconds. The 'Raw JSON Output' heading never appeared.")
-    return False
+    return None
 
 def main_workflow():
-    """Orchestrates the test of submitting "test" and checking for the H3."""
+    """Orchestrates the test of submitting "test" and extracting the result."""
     driver = None
     log_messages = []
     
     log_container = st.container()
     
     def log_callback(message):
-        """Helper function to print logs with both UTC and local CEST time."""
-        utc_now = datetime.now(pytz.utc)
-        cest_tz = pytz.timezone('Europe/Malta')
-        cest_now = utc_now.astimezone(cest_tz)
-        
-        utc_time_str = utc_now.strftime('%H:%M:%S')
-        cest_time_str = cest_now.strftime('%H:%M:%S')
-        
-        log_messages.append(f"`{cest_time_str} (CEST) / {utc_time_str} (UTC)`: {message}")
+        """Helper function to print logs with a simple UTC timestamp."""
+        timestamp = time.strftime('%H:%M:%S', time.gmtime())
+        log_messages.append(f"`{timestamp} (UTC)`: {message}")
         with log_container:
             st.info("\n\n".join(log_messages))
 
@@ -121,25 +127,41 @@ def main_workflow():
         
         log_callback("Locating the text input area...")
         input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')))
-        
-        # CORRECTED LINE: Ensured the string is on one line.
         log_callback("✅ Found text area. Inputting the word 'test'...")
         input_field.send_keys("test")
         
         log_callback("Locating the submit button...")
         submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
-        
-        # CORRECTED LINE: Ensured the string is on one line.
         log_callback("✅ Found submit button. Clicking to generate chunks...")
         submit_button.click()
         
-        was_found = check_for_h3_with_polling(driver, log_callback)
+        extracted_content = find_and_extract_content(driver, log_callback)
 
         # Final Report
-        if was_found:
-            st.success("🎉 **Test Result: PASS** - Submitting 'test' successfully caused the 'Raw JSON Output' heading to appear.")
+        if extracted_content is not None:
+            st.success("🎉 **Test Result: PASS** - Heading was found and content was extracted.")
+            is_valid_json = False
+            try:
+                json.loads(extracted_content)
+                is_valid_json = True
+            except json.JSONDecodeError:
+                pass
+            
+            col1, col2 = st.columns(2)
+            col1.metric("Characters Extracted", f"{len(extracted_content):,}")
+            col2.metric("Is Valid JSON?", "✅ Yes" if is_valid_json else "❌ No")
+            
+            with st.expander("📋 View Extracted Content Preview"):
+                st.code(extracted_content[:2000] + '...', language='json')
+            
+            st.download_button(
+                "💾 Download Full Extracted Content",
+                data=extracted_content,
+                file_name="extracted_content.json",
+                mime="application/json"
+            )
         else:
-            st.error("🔥 **Test Result: FAIL** - The heading did not appear even after submitting 'test' and waiting.")
+            st.error("🔥 **Test Result: FAIL** - The heading did not appear or content could not be extracted. See logs for details.")
 
     except TimeoutException as e:
         log_callback(f"❌ A timeout occurred while finding form elements: {e}. The site may have changed or is slow to load.")
@@ -156,16 +178,15 @@ def main_workflow():
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    if st.button("🧪 Run 'test' Input Test", type="primary", use_container_width=True):
+    if st.button("🧪 Run Full Extraction Test", type="primary", use_container_width=True):
         st.subheader("📋 Real-time Processing Log")
         main_workflow()
 
 with col2:
     with st.expander("ℹ️ How This Test Works", expanded=True):
         st.markdown("""
-        1.  **Navigate**: Opens `chunk.dejan.ai`.
-        2.  **Input 'test'**: Finds the text area and types the word "test".
-        3.  **Submit**: Clicks the 'Generate Chunks' button.
-        4.  **Poll for H3**: After submission, it checks every 5 seconds to see if the `<h3>Raw JSON Output</h3>` heading has been added to the page.
-        5.  **Report**: It reports `PASS` if the heading is found within 2 minutes, or `FAIL` if it is not.
+        1.  **Navigate & Submit**: Opens `chunk.dejan.ai`, inputs "test", and clicks submit.
+        2.  **Poll for H3**: Checks every 5 seconds for the `<h3>Raw JSON Output</h3>` heading.
+        3.  **Extract Content**: Once the heading is found, it locates the `<code>` block below it and copies all its text.
+        4.  **Report**: It reports `PASS` if content is extracted, showing character count and JSON validity. It reports `FAIL` if the heading is not found.
         """)
