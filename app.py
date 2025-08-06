@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Content Processing Automation Project - Final Extraction Logic
+Content Processing Automation Project - Final Prototype
 
 Purpose:
-To definitively extract the complete JSON from the data-clipboard-text
-attribute of the copy button, including a polling mechanism to ensure
-the attribute is fully populated before reading.
+To provide a complete, end-to-end test of the entire workflow:
+1. Scrape content from a real URL using the ContentExtractor logic.
+2. Submit the scraped content to chunk.dejan.ai.
+3. Use the definitive button attribute polling method to extract the final JSON.
 """
 
 import streamlit as st
@@ -14,37 +15,92 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import WebDriverException, NoSuchElementException, TimeoutException
+from selenium.common.exceptions import WebDriverException, TimeoutException
+import requests
+from bs4 import BeautifulSoup
 import json
 import time
-import html # Required to decode HTML entities like &quot;
+import html
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(
-    page_title="Button Attribute Extraction",
-    page_icon="🎯",
+    page_title="Final End-to-End Test",
+    page_icon="🚀",
     layout="wide",
 )
 
-st.title("🎯 Final Extraction Logic: Button Attribute")
+st.title("🚀 Final Prototype: End-to-End URL Processing")
 st.markdown("""
-This script uses the definitive method: it finds the copy button and polls its `data-clipboard-text` attribute until it's fully populated, then decodes it.
+This is the complete test. It takes a URL, scrapes its content using the final logic,
+submits it, and extracts the resulting JSON using the button attribute method.
 """)
 
-# --- Core Functions ---
+# --- Component 1: The Original Content Extractor Class ---
+
+class ContentExtractor:
+    """
+    Handles content extraction from websites using the exact logic from the JavaScript bookmarklet.
+    """
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+
+    def extract_content(self, url):
+        try:
+            response = self.session.get(url, timeout=30)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, 'html.parser')
+            content_parts = []
+
+            # Exact bookmarklet logic for finding the main container
+            main_container_selectors = ['article', 'main', '.content', '#content', '[role="main"]']
+            main_container = None
+            for selector in main_container_selectors:
+                main_container = soup.select_one(selector)
+                if main_container:
+                    break
+            if not main_container:
+                if len(soup.find_all('p')) > 3:
+                    main_container = soup.find_all('p')[0].parent
+                else:
+                    main_container = soup.body
+
+            # Extract H1s
+            for h1 in soup.find_all('h1'):
+                text = h1.get_text(separator='\n', strip=True)
+                if text: content_parts.append(f'H1: {text}')
+
+            # Extract Subtitles
+            for st_element in soup.select('.sub-title,.subtitle,[class*="sub-title"],[class*="subtitle"]'):
+                text = st_element.get_text(separator='\n', strip=True)
+                if text: content_parts.append(f'SUBTITLE: {text}')
+
+            # Extract Leads
+            for lead in soup.select('.lead,[class*="lead"]'):
+                text = lead.get_text(separator='\n', strip=True)
+                if text: content_parts.append(f'LEAD: {text}')
+
+            # Extract Main Content
+            if main_container:
+                main_text = main_container.get_text(separator='\n', strip=True)
+                if main_text: content_parts.append(f'CONTENT: {main_text}')
+
+            return True, '\n\n'.join(content_parts) or "No content found", None
+        except requests.RequestException as e:
+            return False, None, f"Error fetching URL: {e}"
+
+# --- Component 2: The Final Selenium Interaction Logic ---
 
 def get_stable_chrome_options():
-    """Returns a set of ultra-stable Chrome options for Streamlit Cloud."""
     chrome_options = Options()
     chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--window-size=1280,720')
     return chrome_options
 
 def setup_driver():
-    """Initializes and returns a stable Selenium WebDriver instance."""
     try:
         driver = webdriver.Chrome(options=get_stable_chrome_options())
         return driver
@@ -53,127 +109,119 @@ def setup_driver():
         return None
 
 def extract_from_button_attribute(driver, log_callback):
-    """
-    Finds the copy button and robustly extracts the complete JSON from its attribute.
-    """
     try:
-        # Step 1: Wait for the H3 heading as a signal that the results area is ready.
         h3_xpath = "//h3[text()='Raw JSON Output']"
-        wait = WebDriverWait(driver, 120) # Wait up to 2 minutes for the whole process
-        log_callback("🔄 Waiting for results section to appear (by finding H3 heading)...")
+        wait = WebDriverWait(driver, 120)
+        log_callback("🔄 Waiting for results section to appear...")
         wait.until(EC.presence_of_element_located((By.XPATH, h3_xpath)))
-        log_callback("✅ Found H3 heading. The results section is now visible.")
+        log_callback("✅ Results section is visible.")
 
-        # Step 2: Now wait specifically for the copy button to exist.
         button_selector = "button[data-testid='stCodeCopyButton']"
-        log_callback("...Waiting for the copy button to be added to the page...")
+        log_callback("...Waiting for the copy button...")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, button_selector)))
         copy_button = driver.find_element(By.CSS_SELECTOR, button_selector)
         log_callback("✅ Found the copy button element.")
 
-        # Step 3: Poll the button's attribute to ensure it's fully populated.
-        # This solves the "partial content" race condition.
-        log_callback("...Polling the button's 'data-clipboard-text' attribute for completeness...")
-        timeout = time.time() + 10  # Poll for up to 10 seconds
+        log_callback("...Polling button attribute for completeness...")
+        timeout = time.time() + 10
         final_content = ""
         while time.time() < timeout:
             raw_content = copy_button.get_attribute('data-clipboard-text')
-            # A complete JSON string will start with { and end with }
             if raw_content and raw_content.strip().startswith('{') and raw_content.strip().endswith('}'):
                 final_content = raw_content
-                break # Exit the loop as soon as we have a complete string
-            time.sleep(0.2) # Check 5 times per second
-
+                break
+            time.sleep(0.2)
+        
         if not final_content:
-            log_callback("❌ Timed out polling the attribute. It never became a complete JSON string.")
+            log_callback("❌ Timed out polling the attribute.")
             return None
 
-        log_callback("✅ Attribute is fully populated.")
-
-        # Step 4: Decode the HTML entities from the string.
-        log_callback("...Decoding HTML entities (e.g., &quot; to \")...")
+        log_callback("...Decoding HTML entities...")
         decoded_content = html.unescape(final_content)
-        log_callback(f"✅ Extraction and decoding complete. Retrieved {len(decoded_content):,} characters.")
-        
+        log_callback(f"✅ Extraction complete. Retrieved {len(decoded_content):,} characters.")
         return decoded_content
-
-    except TimeoutException:
-        log_callback(f"❌ Test Failed: Timed out waiting for the H3 heading or the copy button to appear.")
-        return None
     except Exception as e:
-        log_callback(f"❌ An unexpected error occurred during extraction: {e}")
+        log_callback(f"❌ An error occurred during extraction: {e}")
         return None
 
-def main_workflow():
-    """Orchestrates the test using the definitive button extraction method."""
+def main_workflow(url):
     driver = None
     log_messages = []
-    
-    log_container = st.container()
+    log_container = st.empty()
     
     def log_callback(message):
         timestamp = time.strftime('%H:%M:%S', time.gmtime())
         log_messages.append(f"`{timestamp} (UTC)`: {message}")
-        with log_container:
-            st.info("\n\n".join(log_messages))
+        log_container.info("\n\n".join(log_messages))
 
     try:
-        log_callback("Starting final test workflow...")
+        # Step 1: Scrape content from the provided URL
+        log_callback("Initializing ContentExtractor...")
+        extractor = ContentExtractor()
+        log_callback(f"Extracting content from: {url}")
+        success, content_to_submit, error = extractor.extract_content(url)
+        if not success:
+            log_callback(f"🔥 FAILED to extract content: {error}")
+            return
+        log_callback(f"✅ Content extracted successfully ({len(content_to_submit):,} chars).")
+        with st.expander("View Scraped Content"):
+            st.text(content_to_submit)
+
+        # Step 2: Set up Selenium and submit the scraped content
+        log_callback("Initializing browser...")
         driver = setup_driver()
         if not driver: return
 
         log_callback("Navigating to `chunk.dejan.ai`...")
         driver.get("https://chunk.dejan.ai/")
-        
         wait = WebDriverWait(driver, 20)
         
-        log_callback("Locating the text input area...")
+        log_callback("Pasting scraped content...")
         input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')))
-        log_callback("Inputting the word 'test'...")
-        input_field.send_keys("test")
+        # Send content in chunks to avoid potential issues with very large pastes
+        for i in range(0, len(content_to_submit), 1000):
+            input_field.send_keys(content_to_submit[i:i+1000])
         
-        log_callback("Locating and clicking the submit button...")
+        log_callback("Clicking submit button...")
         submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
         submit_button.click()
         
+        # Step 3: Run the definitive extraction logic
         extracted_content = extract_from_button_attribute(driver, log_callback)
 
-        # Final Report
+        # Step 4: Final Report
         if extracted_content:
-            st.success("🎉 **Test Result: PASS** - Content was successfully extracted from the button attribute.")
-            is_valid_json = False
-            try:
-                json.loads(extracted_content)
-                is_valid_json = True
-            except json.JSONDecodeError:
-                pass
-            
+            st.success("🎉 **Workflow Complete!** Content was scraped and JSON was extracted successfully.")
+            is_valid_json = json.loads(extracted_content) is not None
             col1, col2 = st.columns(2)
             col1.metric("Characters Extracted", f"{len(extracted_content):,}")
             col2.metric("Is Valid JSON?", "✅ Yes" if is_valid_json else "❌ No")
             
-            with st.expander("📋 View Extracted JSON"):
+            with st.expander("📋 View Extracted JSON", expanded=True):
                 st.code(extracted_content, language='json')
             
-            st.download_button(
-                "💾 Download Full Extracted JSON",
-                data=extracted_content,
-                file_name="extracted_content.json",
-                mime="application/json"
-            )
+            st.download_button("💾 Download Full Extracted JSON", data=extracted_content, file_name="extracted_content.json", mime="application/json")
         else:
-            st.error("🔥 **Test Result: FAIL** - Could not extract content. See logs for details.")
-
+            st.error("🔥 **Workflow Failed.** Could not extract content after submission. See logs for details.")
     except Exception as e:
         log_callback(f"💥 An unexpected error occurred in the main workflow: {e}")
     finally:
         if driver:
             log_callback("Cleaning up and closing browser instance.")
             driver.quit()
-            log_callback("✅ Test finished.")
+            log_callback("✅ Workflow finished.")
 
 # --- Streamlit UI ---
+st.subheader("Enter URL to Process")
+url_to_process = st.text_input(
+    "URL:", 
+    "https://www.theverge.com/23945435/google-search-generative-experience-crossword-add-on",
+    help="Enter a full URL of an article to scrape and process."
+)
 
-if st.button("🧪 Run Final Extraction Test", type="primary", use_container_width=True):
-    st.subheader("📋 Real-time Processing Log")
-    main_workflow()
+if st.button("🚀 Run Full Workflow", type="primary", use_container_width=True):
+    if url_to_process:
+        st.subheader("📋 Real-time Processing Log")
+        main_workflow(url_to_process)
+    else:
+        st.error("Please enter a URL to process.")
