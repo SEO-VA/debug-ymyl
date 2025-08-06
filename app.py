@@ -15,7 +15,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 import json
 import html
 import re
@@ -92,7 +92,6 @@ def extract_after_raw_header(driver):
             By.XPATH,
             "//h3[normalize-space(text())='Raw JSON Output']"
         )
-        # Collect all following siblings
         siblings = driver.find_elements(
             By.XPATH,
             "//h3[normalize-space(text())='Raw JSON Output']/following-sibling::*"
@@ -139,14 +138,22 @@ def test_extraction_methods_workflow(url):
         input_field.clear()
         input_field.send_keys(content[:1000])
 
-        # Submit
-        submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
-        submit.click()
+        # Submit button with scroll and JS click fallback
+        try:
+            submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
+            # Scroll into view
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", submit)
+            time.sleep(0.5)
+            # Try normal click
+            submit.click()
+        except (ElementClickInterceptedException, TimeoutException) as e:
+            st.warning(f"⚠️ Click intercepted or timeout: {e}, attempting JS click...")
+            driver.execute_script("arguments[0].click();", submit)
 
         # Wait for fetch pattern
         wait_for_fourth_fetch(driver)
 
-        # New: extract all text after Raw JSON Output
+        # Extract all text after Raw JSON Output header
         raw_json_all = extract_after_raw_header(driver)
         if raw_json_all:
             st.write(f"✅ Extracted after header: {len(raw_json_all)} chars")
@@ -158,8 +165,6 @@ def test_extraction_methods_workflow(url):
             )
         else:
             st.warning("⚠️ No content extracted after header.")
-
-        # Continue with other extraction tests if desired...
 
     except Exception as e:
         st.error(f"❌ Workflow failed: {e}")
