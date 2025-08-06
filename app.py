@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Content Processing Automation Project - Final Application-Ready Script
+Content Processing Automation Project - Final Logic with Re-Find Loop
 
 Purpose:
-This is the final, production-ready logic. It uses JavaScript injection
-to handle large text inputs, preventing StaleElementReferenceExceptions,
-and then uses the definitive button attribute polling method to extract the final JSON.
+This script handles arbitrarily large content by sending it in chunks and
+re-finding the input element before sending each chunk. This prevents
+StaleElementReferenceExceptions on dynamic web pages.
 """
 
 import streamlit as st
@@ -31,7 +31,7 @@ st.set_page_config(
 )
 
 st.title("🚀 Content Processing Automation")
-st.markdown("Enter a URL to scrape its content, process it through `chunk.dejan.ai`, and extract the resulting JSON.")
+st.markdown("Enter a URL to scrape its content, process it, and extract the resulting JSON using the final, stable logic.")
 
 # --- Component 1: The Original Content Extractor Class ---
 class ContentExtractor:
@@ -96,15 +96,15 @@ def extract_from_button_attribute(driver, log_callback):
     try:
         h3_xpath = "//h3[text()='Raw JSON Output']"
         wait = WebDriverWait(driver, 120)
-        log_callback("🔄 Waiting for results section to appear (by finding H3 heading)...")
+        log_callback("🔄 Waiting for results section to appear...")
         wait.until(EC.presence_of_element_located((By.XPATH, h3_xpath)))
         log_callback("✅ Results section is visible.")
         button_selector = "button[data-testid='stCodeCopyButton']"
-        log_callback("...Waiting for the copy button to be added to the page...")
+        log_callback("...Waiting for the copy button...")
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, button_selector)))
         copy_button = driver.find_element(By.CSS_SELECTOR, button_selector)
         log_callback("✅ Found the copy button element.")
-        log_callback("...Polling the button's 'data-clipboard-text' attribute for completeness...")
+        log_callback("...Polling button attribute for completeness...")
         timeout = time.time() + 10
         final_content = ""
         while time.time() < timeout:
@@ -114,9 +114,8 @@ def extract_from_button_attribute(driver, log_callback):
                 break
             time.sleep(0.2)
         if not final_content:
-            log_callback("❌ Timed out polling the attribute. It never became a complete JSON string.")
-            return None
-        log_callback("...Decoding HTML entities (e.g., &quot; to \")...")
+            log_callback("❌ Timed out polling the attribute."); return None
+        log_callback("...Decoding HTML entities...")
         decoded_content = html.unescape(final_content)
         log_callback(f"✅ Extraction complete. Retrieved {len(decoded_content):,} characters.")
         return decoded_content
@@ -153,20 +152,22 @@ def main_workflow(url):
         driver.get("https://chunk.dejan.ai/")
         wait = WebDriverWait(driver, 20)
         
-        log_callback("Locating text area...")
-        input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')))
+        # --- NEW "RE-FIND LOOP" LOGIC ---
+        log_callback("Pasting content using robust 'Re-Find' loop method...")
+        chunk_size = 500
+        content_chunks = [content_to_submit[i:i + chunk_size] for i in range(0, len(content_to_submit), chunk_size)]
         
-        # --- THIS IS THE CORRECTED SECTION ---
-        # Use JavaScript to instantly set the text area value, preventing stale element errors.
-        log_callback("Injecting content via JavaScript to handle large text...")
-        js_script = """
-            var el = arguments[0];
-            var text = arguments[1];
-            el.value = text;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-        """
-        driver.execute_script(js_script, input_field, content_to_submit)
-        log_callback("✅ Content injected successfully.")
+        # Clear the field once at the beginning
+        input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')))
+        input_field.clear()
+
+        for i, chunk in enumerate(content_chunks):
+            # For every chunk, re-find the element to get a fresh reference
+            input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')))
+            input_field.send_keys(chunk)
+            log_callback(f"...Sent chunk {i+1}/{len(content_chunks)}")
+        
+        log_callback("✅ Full content sent successfully.")
 
         log_callback("Clicking submit button...")
         submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
@@ -175,18 +176,16 @@ def main_workflow(url):
         extracted_content = extract_from_button_attribute(driver, log_callback)
 
         if extracted_content:
-            st.success("🎉 **Workflow Complete!** Content was scraped and JSON was extracted successfully.")
+            st.success("🎉 **Workflow Complete!**")
             is_valid_json = json.loads(extracted_content) is not None
             col1, col2 = st.columns(2)
             col1.metric("Characters Extracted", f"{len(extracted_content):,}")
             col2.metric("Is Valid JSON?", "✅ Yes" if is_valid_json else "❌ No")
-            
             with st.expander("📋 View Extracted JSON", expanded=True):
                 st.code(extracted_content, language='json')
-            
             st.download_button("💾 Download Full Extracted JSON", data=extracted_content, file_name="extracted_content.json", mime="application/json")
         else:
-            st.error("🔥 **Workflow Failed.** Could not extract content after submission. See logs for details.")
+            st.error("🔥 **Workflow Failed.** See logs for details.")
     except Exception as e:
         log_callback(f"💥 An unexpected error occurred in the main workflow: {e}")
     finally:
