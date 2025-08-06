@@ -90,14 +90,6 @@ def extract_after_raw_header(driver):
     combined = html.unescape("
 
 ".join(texts))
-    return combined
-
-# Reformat test_header_based_extraction to call new signature
-def test_header_based_extraction(url):
-    # 1. Content extraction
-    content = extract_content_simple(url)
-    if not content:
-        st.write("🏁 Run finished: no content extracted.")
         return None
 
     # 2. Launch browser
