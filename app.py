@@ -89,7 +89,7 @@ def extract_after_raw_header(driver):
     texts = [e.text.strip() for e in siblings if e.text.strip()]
     combined = html.unescape("
 
-".join(texts))
+".join(texts)))
         return None
 
     # 2. Launch browser
