@@ -90,7 +90,6 @@ def extract_after_raw_header(driver):
     combined = html.unescape("
 
 ".join(texts))
-    st.write(f"✅ Extracted {len(combined)} chars after header.")
     return combined
 
 # Reformat test_header_based_extraction to call new signature
