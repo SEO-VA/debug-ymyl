@@ -1,186 +1,110 @@
 #!/usr/bin/env python3
 """
-JSON Extraction Methods Test App (Updated)
+Minimal JSON Extraction Test
 
-Tests different ways to extract complete JSON content from the
-stCodeCopyButton element _and_ by selecting all text after the "Raw JSON Output" header
-once the 4th fetch has been detected.
+Only waits for the 4th fetch to complete and then copies
+all text following the "Raw JSON Output" header.
 """
 
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
-import json
+from selenium.common.exceptions import TimeoutException
 import html
-import re
 import time
 
 # Page config
-st.set_page_config(
-    page_title="JSON Extraction Test",
-    page_icon="🔍",
-    layout="wide"
-)
-
-
-def extract_content_simple(url):
-    """Quick content extraction for testing"""
-    try:
-        response = requests.get(url, timeout=30)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        text_content = soup.get_text()[:2000]
-        return f"CONTENT: {text_content}"
-    except:
-        return "Test content for JSON extraction methods testing."
+st.set_page_config(page_title="Minimal JSON Fetch Test", page_icon="🔍", layout="wide")
 
 
 def setup_driver():
-    """Setup Chrome driver with performance logging"""
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
-    options.add_argument('--single-process')
-    options.add_argument('--window-size=1280,720')
+    # enable performance logs for fetch detection
     options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
     driver = webdriver.Chrome(options=options)
-    driver.set_page_load_timeout(60)
-    driver.implicitly_wait(15)
+    driver.implicitly_wait(10)
     return driver
 
 
 def wait_for_fourth_fetch(driver, endpoint="index.NJ4tUjPs809", timeout=180):
-    """Detect 4 fetch requests to the given endpoint"""
     fetch_count = 0
     seen = set()
     start = time.time()
     while fetch_count < 4 and time.time() - start < timeout:
-        try:
-            for log in driver.get_log('performance'):
-                msg = str(log)
-                if endpoint in msg and 'fetch' in msg.lower():
-                    tag = (log.get('timestamp'), hash(msg))
-                    if tag not in seen:
-                        seen.add(tag)
-                        fetch_count += 1
-                        st.write(f"🎯 Detected fetch {fetch_count}/4")
-                        if fetch_count >= 4:
-                            st.write("✅ 4th fetch complete, waiting 1s buffer...")
-                            time.sleep(1)
-                            return True
-        except:
-            pass
+        for entry in driver.get_log('performance'):
+            msg = str(entry)
+            if endpoint in msg and 'fetch' in msg.lower():
+                tag = (entry.get('timestamp'), hash(msg))
+                if tag not in seen:
+                    seen.add(tag)
+                    fetch_count += 1
+                    st.write(f"🕵️ Fetch {fetch_count}/4 detected")
+                    if fetch_count == 4:
+                        time.sleep(1)  # buffer
+                        return True
         time.sleep(0.5)
-    st.warning("⏰ Timeout or fewer than 4 fetches detected, continuing anyway...")
+    st.warning("⏰ Did not detect 4 fetches within timeout, proceeding anyway...")
     return True
 
 
 def extract_after_raw_header(driver):
-    """
-    After the JSON has rendered, locate the <h3> with text "Raw JSON Output"
-    and grab all following sibling elements' text.
-    """
     try:
-        header = driver.find_element(
-            By.XPATH,
-            "//h3[normalize-space(text())='Raw JSON Output']"
-        )
-        siblings = driver.find_elements(
-            By.XPATH,
-            "//h3[normalize-space(text())='Raw JSON Output']/following-sibling::*"
-        )
-        full_text = []
-        for elem in siblings:
-            txt = elem.text
-            if txt:
-                full_text.append(txt)
-        combined = "\n\n".join(full_text)
-        return html.unescape(combined)
+        # find the Raw JSON Output header
+        header = driver.find_element(By.XPATH, "//h3[normalize-space(text())='Raw JSON Output']")
+        # grab all siblings after header
+        elems = driver.find_elements(By.XPATH, "//h3[normalize-space(text())='Raw JSON Output']/following-sibling::*")
+        texts = [e.text for e in elems if e.text]
+        return html.unescape("\n\n".join(texts))
     except Exception as e:
-        st.error(f"❌ Failed to extract after header: {e}")
+        st.error(f"Error extracting JSON: {e}")
         return None
 
 
-def test_extraction_methods_workflow(url):
-    st.write("🔍 Extracting content for testing...")
-    content = extract_content_simple(url)
-    st.success(f"Content ready: {len(content)} chars")
-
-    st.write("🌐 Launching browser and processing...")
+def test_fetch_and_copy(url):
     driver = setup_driver()
     try:
         driver.get("https://chunk.dejan.ai/")
-        time.sleep(8)
-        wait = WebDriverWait(driver, 60)
-        # Locate textarea with fallbacks
-        input_field = None
-        for by, sel in [
-            (By.ID, "text_area_1"),
-            (By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]'),
-            (By.CSS_SELECTOR, 'textarea'),
-        ]:
-            try:
-                input_field = wait.until(EC.presence_of_element_located((by, sel)))
-                st.write(f"✅ Found input via {by} {sel}")
-                break
-            except TimeoutException:
-                st.write(f"⚠️ No input with {by} {sel}")
-        if not input_field:
-            st.error("❌ Could not find input field, aborting.")
-            return
-        input_field.clear()
-        input_field.send_keys(content[:1000])
+        time.sleep(5)
 
-        # Submit button with scroll and JS click fallback
-        try:
-            submit = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
-            # Scroll into view
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", submit)
-            time.sleep(0.5)
-            # Try normal click
-            submit.click()
-        except (ElementClickInterceptedException, TimeoutException) as e:
-            st.warning(f"⚠️ Click intercepted or timeout: {e}, attempting JS click...")
-            driver.execute_script("arguments[0].click();", submit)
+        # input area
+        textarea = WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea'))
+        )
+        textarea.clear()
+        textarea.send_keys(url)  # feed URL directly
 
-        # Wait for fetch pattern
+        # click generate
+        btn = WebDriverWait(driver, 30).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]'))
+        )
+        driver.execute_script("arguments[0].click();", btn)
+
+        # wait for fetches
         wait_for_fourth_fetch(driver)
 
-        # Extract all text after Raw JSON Output header
-        raw_json_all = extract_after_raw_header(driver)
-        if raw_json_all:
-            st.write(f"✅ Extracted after header: {len(raw_json_all)} chars")
-            st.download_button(
-                "💾 Download Full Raw JSON Text",
-                raw_json_all,
-                f"raw_json_output_{int(time.time())}.txt",
-                "text/plain"
-            )
-        else:
-            st.warning("⚠️ No content extracted after header.")
-
-    except Exception as e:
-        st.error(f"❌ Workflow failed: {e}")
+        # extract JSON
+        return extract_after_raw_header(driver)
     finally:
         driver.quit()
 
 
 def main():
-    st.title("🔍 JSON Extraction Methods Test (Updated)")
-    st.markdown("**Now captures all text following the Raw JSON Output header.**")
-    url = st.text_input("URL to test:")
+    st.title("🔍 Minimal JSON Fetch Test")
+    url = st.text_input("Enter text or URL to send to chunk.dejan.ai:")
     if st.button("Run Test"):
         if not url:
-            st.error("Enter a URL first.")
+            st.error("Please enter something to process.")
         else:
-            test_extraction_methods_workflow(url)
+            result = test_fetch_and_copy(url)
+            if result:
+                st.text_area("Raw JSON Output:", value=result, height=400)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
