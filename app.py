@@ -65,9 +65,16 @@ def setup_driver():
 
 def wait_for_fourth_fetch(driver, endpoint="index.NJ4tUjPs809"):
     """Blocks until exactly 4 distinct fetch requests to the endpoint are observed."""
+    logger.info("Clearing existing performance logs before fetch detection...")
+    # Clear any pre-existing logs
+    try:
+        driver.get_log('performance')
+    except Exception:
+        pass
     logger.info("Waiting for 4th fetch (pure detection)...")
     fetch_count = 0
     seen = set()
+    start_time = time.time()
     while fetch_count < 4:
         try:
             logs = driver.get_log('performance')
@@ -78,17 +85,18 @@ def wait_for_fourth_fetch(driver, endpoint="index.NJ4tUjPs809"):
                     if tag not in seen:
                         seen.add(tag)
                         fetch_count += 1
-                        elapsed = time.time()
-                        logger.info(f"Fetch {fetch_count}/4 detected")
-                        st.write(f"🕵️ Fetch {fetch_count}/4 detected")
+                        elapsed = time.time() - start_time
+                        logger.info(f"Fetch {fetch_count}/4 detected at {elapsed:.2f}s")
+                        st.write(f"🕵️ Fetch {fetch_count}/4 detected ({elapsed:.1f}s)")
                         if fetch_count == 4:
+                            logger.info("4th fetch detected, proceeding immediately.")
                             return
         except WebDriverException as e:
             logger.warning(f"Error reading performance logs: {e}")
-        time.sleep(0.3)
+        time.sleep(0.1)
 
 
-def extract_after_raw_header(driver):
+def extract_after_raw_header(driver):(driver):
     """Extracts all following sibling text after the Raw JSON Output header."""
     logger.info("Extracting text after 'Raw JSON Output' header...")
     try:
