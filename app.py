@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Selenium Timing Test App for chunk.dejan.ai
+JSON Extraction Methods Test App
 
-A dedicated Streamlit app to test and find the optimal timing
-for extracting complete JSON from chunk.dejan.ai after processing.
+Tests different ways to extract complete JSON content from the 
+stCodeCopyButton element after chunk.dejan.ai processing.
 
-This app helps debug the exact delay needed after the copy button appears
-to get complete JSON content from the stCodeCopyButton element.
+Focus: EXTRACTION METHODS, not timing
+Goal: Find the method that gets 100% of the JSON content
 """
 
 import streamlit as st
@@ -17,460 +17,452 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import TimeoutException
 import json
-import time
 import html
-import pandas as pd
-from datetime import datetime
+import re
+import time
 
 # Page config
 st.set_page_config(
-    page_title="Timing Test App",
-    page_icon="🧪",
+    page_title="JSON Extraction Test",
+    page_icon="🔍",
     layout="wide"
 )
 
-# Initialize session state
-if 'test_results' not in st.session_state:
-    st.session_state.test_results = []
-if 'current_test' not in st.session_state:
-    st.session_state.current_test = None
-
-def extract_content_for_testing(url):
-    """Extract content using the same bookmarklet logic for consistent testing"""
+def extract_content_simple(url):
+    """Quick content extraction for testing"""
     try:
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
-        
-        response = session.get(url, timeout=30)
-        response.raise_for_status()
-        
+        response = requests.get(url, timeout=30)
         soup = BeautifulSoup(response.content, 'html.parser')
-        content_parts = []
         
-        # Find main container
-        selectors = ['article', 'main', '.content', '#content', '[role="main"]']
-        main_container = None
-        for selector in selectors:
-            main_container = soup.select_one(selector)
-            if main_container:
-                break
-        
-        if not main_container:
-            paragraphs = soup.find_all('p')
-            if len(paragraphs) > 3:
-                main_container = paragraphs[0].parent
-            else:
-                main_container = soup.find('body')
-        
-        # Extract H1s
-        h1_elements = soup.find_all('h1')
-        for h1 in h1_elements:
-            text = h1.get_text(separator='\n', strip=True)
-            if text.strip():
-                content_parts.append(f'H1: {text.strip()}')
-        
-        # Extract subtitles
-        subtitles = soup.select('.sub-title,.subtitle,[class*="sub-title"],[class*="subtitle"]')
-        for subtitle in subtitles:
-            class_names = ' '.join(subtitle.get('class', []))
-            if 'd-block' in class_names or subtitle.find_parent(class_='d-block'):
-                text = subtitle.get_text(separator='\n', strip=True)
-                if text.strip():
-                    content_parts.append(f'SUBTITLE: {text.strip()}')
-        
-        # Extract leads
-        leads = soup.select('.lead,[class*="lead"]')
-        for lead in leads:
-            text = lead.get_text(separator='\n', strip=True)
-            if text.strip():
-                content_parts.append(f'LEAD: {text.strip()}')
-        
-        # Extract main content
-        if main_container:
-            main_text = main_container.get_text(separator='\n', strip=True)
-            if main_text.strip():
-                content_parts.append(f'CONTENT: {main_text.strip()}')
-        
-        final_content = '\n\n'.join(content_parts) if content_parts else 'No content found'
-        return True, final_content, None
-        
-    except Exception as e:
-        return False, None, str(e)
+        # Simple extraction
+        text_content = soup.get_text()[:2000]  # First 2000 chars for testing
+        return f"CONTENT: {text_content}"
+    except:
+        return "Test content for JSON extraction methods testing."
 
-def setup_test_driver():
-    """Setup Chrome driver for testing"""
-    try:
-        chrome_options = Options()
-        chrome_options.add_argument('--headless=new')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--disable-images')
-        chrome_options.add_argument('--window-size=1280,720')
-        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
-        
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.implicitly_wait(10)
-        return driver, None
-    except Exception as e:
-        return None, str(e)
+def setup_driver():
+    """Setup Chrome driver"""
+    options = Options()
+    options.add_argument('--headless=new')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+    
+    return webdriver.Chrome(options=options)
 
-def monitor_network_activity(driver, status_placeholder, log_placeholder):
-    """Monitor network activity and copy button appearance"""
+def wait_for_processing_simple(driver):
+    """Wait for processing with simple 4-fetch detection + 1 second"""
+    endpoint = "index.NJ4tUjPs809"
+    fetch_count = 0
+    seen_requests = set()
     start_time = time.time()
-    endpoint_requests = 0
-    copy_button_time = None
     
-    status_placeholder.info("🔍 Monitoring network activity...")
+    st.write("🔍 Monitoring for 4th fetch request...")
     
-    while time.time() - start_time < 120:  # 2 minute timeout
-        elapsed = time.time() - start_time
-        
-        # Check for copy button
-        if copy_button_time is None:
-            copy_buttons = driver.find_elements(By.CSS_SELECTOR, '[data-testid="stCodeCopyButton"]')
-            if copy_buttons:
-                copy_button_time = elapsed
-                status_placeholder.success(f"📋 Copy button appeared at {elapsed:.1f}s")
-                log_placeholder.text(f"📋 Copy button detected at {elapsed:.1f} seconds")
-                return True, copy_button_time, endpoint_requests
-        
-        # Monitor network logs
+    while fetch_count < 4 and time.time() - start_time < 60:
         try:
             logs = driver.get_log('performance')
             for log in logs:
-                log_str = str(log)
-                if "index.NJ4tUjPs809" in log_str and 'fetch' in log_str.lower():
-                    endpoint_requests += 1
-                    log_placeholder.text(f"🎯 Endpoint request #{endpoint_requests} at {elapsed:.1f}s")
+                if endpoint in str(log) and 'fetch' in str(log).lower():
+                    log_id = f"{log.get('timestamp', 0)}_{hash(str(log))}"
+                    if log_id not in seen_requests:
+                        seen_requests.add(log_id)
+                        fetch_count += 1
+                        st.write(f"🎯 Fetch {fetch_count}/4 detected")
+                        
+                        if fetch_count >= 4:
+                            st.write("✅ 4th fetch completed - waiting 1 second...")
+                            time.sleep(1)  # Your preferred 1-second delay
+                            return True
         except:
             pass
-        
-        # Update status
-        if elapsed % 5 < 0.5:  # Every 5 seconds
-            status_placeholder.info(f"🔍 Monitoring... ({elapsed:.0f}s elapsed, {endpoint_requests} requests)")
-        
-        time.sleep(0.5)
+        time.sleep(0.3)
     
-    status_placeholder.error("⏰ Timeout - copy button never appeared")
-    return False, None, endpoint_requests
+    # Fallback: wait for copy button + 1 second
+    st.write("⚠️ Fallback: waiting for copy button + 1 second...")
+    try:
+        wait = WebDriverWait(driver, 60)
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="stCodeCopyButton"]')))
+        time.sleep(1)
+        return True
+    except:
+        return False
 
-def test_extraction_timing(driver, test_delays, progress_bar, status_placeholder):
-    """Test extraction at different delays after copy button appears"""
-    results = []
+def test_extraction_methods(driver):
+    """Test multiple ways to extract JSON from the copy button"""
+    st.write("🧪 Testing different extraction methods...")
     
+    methods = {}
+    
+    # Method 1: Standard getAttribute
+    st.write("\n**Method 1: Standard getAttribute('data-clipboard-text')**")
+    try:
+        copy_button = driver.find_element(By.CSS_SELECTOR, '[data-testid="stCodeCopyButton"]')
+        raw_content = copy_button.get_attribute('data-clipboard-text')
+        if raw_content:
+            decoded = html.unescape(raw_content)
+            methods['Method 1'] = {
+                'raw_length': len(raw_content),
+                'decoded_length': len(decoded),
+                'content': decoded,
+                'valid_json': is_valid_json(decoded)
+            }
+            st.write(f"   Raw: {len(raw_content)} chars, Decoded: {len(decoded)} chars")
+        else:
+            methods['Method 1'] = {'error': 'No content found'}
+            st.write("   ❌ No content found")
+    except Exception as e:
+        methods['Method 1'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    # Method 2: JavaScript execution
+    st.write("\n**Method 2: JavaScript execution**")
+    try:
+        js_script = """
+            var button = document.querySelector('[data-testid="stCodeCopyButton"]');
+            return button ? button.getAttribute('data-clipboard-text') : null;
+        """
+        raw_content = driver.execute_script(js_script)
+        if raw_content:
+            decoded = html.unescape(raw_content)
+            methods['Method 2'] = {
+                'raw_length': len(raw_content),
+                'decoded_length': len(decoded),
+                'content': decoded,
+                'valid_json': is_valid_json(decoded)
+            }
+            st.write(f"   Raw: {len(raw_content)} chars, Decoded: {len(decoded)} chars")
+        else:
+            methods['Method 2'] = {'error': 'No content found'}
+            st.write("   ❌ No content found")
+    except Exception as e:
+        methods['Method 2'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    # Method 3: Multiple attribute checks
+    st.write("\n**Method 3: Check multiple attributes**")
     try:
         copy_button = driver.find_element(By.CSS_SELECTOR, '[data-testid="stCodeCopyButton"]')
         
-        for i, delay in enumerate(test_delays):
-            progress_bar.progress((i + 1) / len(test_delays))
-            status_placeholder.info(f"⏱️ Testing {delay}s delay... ({i+1}/{len(test_delays)})")
-            
-            if i > 0:
-                sleep_time = delay - test_delays[i-1]
-                time.sleep(sleep_time)
-            
+        # Try different attributes
+        attributes_to_check = [
+            'data-clipboard-text',
+            'data-clipboard-target', 
+            'title',
+            'aria-label',
+            'innerHTML',
+            'textContent'
+        ]
+        
+        attribute_results = {}
+        for attr in attributes_to_check:
             try:
-                # Get content
-                raw_content = copy_button.get_attribute('data-clipboard-text')
-                
-                if raw_content:
-                    decoded_content = html.unescape(raw_content)
-                    
-                    # Try to parse JSON
-                    try:
-                        json_data = json.loads(decoded_content)
-                        big_chunks = len(json_data.get('big_chunks', []))
-                        total_small = sum(len(chunk.get('small_chunks', [])) 
-                                        for chunk in json_data.get('big_chunks', []))
-                        
-                        results.append({
-                            'delay': delay,
-                            'length': len(decoded_content),
-                            'valid_json': True,
-                            'big_chunks': big_chunks,
-                            'small_chunks': total_small,
-                            'error': None
-                        })
-                        
-                    except json.JSONDecodeError as e:
-                        results.append({
-                            'delay': delay,
-                            'length': len(decoded_content),
-                            'valid_json': False,
-                            'big_chunks': 0,
-                            'small_chunks': 0,
-                            'error': f"Invalid JSON: {str(e)[:50]}"
-                        })
+                value = copy_button.get_attribute(attr)
+                if value and len(value) > 100:  # Only show substantial content
+                    if attr == 'data-clipboard-text':
+                        decoded = html.unescape(value)
+                        attribute_results[attr] = len(decoded)
+                    else:
+                        attribute_results[attr] = len(value)
                 else:
-                    results.append({
-                        'delay': delay,
-                        'length': 0,
-                        'valid_json': False,
-                        'big_chunks': 0,
-                        'small_chunks': 0,
-                        'error': "No content found"
-                    })
-                    
-            except Exception as e:
-                results.append({
-                    'delay': delay,
-                    'length': 0,
-                    'valid_json': False,
-                    'big_chunks': 0,
-                    'small_chunks': 0,
-                    'error': str(e)
+                    attribute_results[attr] = 0
+            except:
+                attribute_results[attr] = 'error'
+        
+        st.write(f"   Attribute lengths: {attribute_results}")
+        
+        # Use the best one
+        best_attr = max(attribute_results.keys(), key=lambda k: attribute_results[k] if isinstance(attribute_results[k], int) else 0)
+        if attribute_results[best_attr] > 100:
+            content = copy_button.get_attribute(best_attr)
+            if best_attr == 'data-clipboard-text':
+                content = html.unescape(content)
+            methods['Method 3'] = {
+                'best_attribute': best_attr,
+                'length': len(content),
+                'content': content,
+                'valid_json': is_valid_json(content)
+            }
+        else:
+            methods['Method 3'] = {'error': 'No substantial content in any attribute'}
+            
+    except Exception as e:
+        methods['Method 3'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    # Method 4: Element text content
+    st.write("\n**Method 4: Element text and innerHTML**")
+    try:
+        copy_button = driver.find_element(By.CSS_SELECTOR, '[data-testid="stCodeCopyButton"]')
+        
+        text_content = copy_button.text
+        inner_html = copy_button.get_attribute('innerHTML')
+        
+        st.write(f"   Text content: {len(text_content)} chars")
+        st.write(f"   innerHTML: {len(inner_html)} chars")
+        
+        # Check if either contains JSON-like content
+        best_content = None
+        if '"big_chunks"' in text_content:
+            best_content = text_content
+        elif '"big_chunks"' in inner_html:
+            best_content = html.unescape(inner_html)
+        
+        if best_content:
+            methods['Method 4'] = {
+                'length': len(best_content),
+                'content': best_content,
+                'valid_json': is_valid_json(best_content)
+            }
+        else:
+            methods['Method 4'] = {'error': 'No JSON content found in text or HTML'}
+            
+    except Exception as e:
+        methods['Method 4'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    # Method 5: Page source extraction
+    st.write("\n**Method 5: Extract from page source**")
+    try:
+        page_source = driver.page_source
+        
+        # Look for JSON content in page source
+        if '"big_chunks"' in page_source:
+            # Try to extract JSON using regex
+            patterns = [
+                r'data-clipboard-text="([^"]*)"',
+                r'"big_chunks":\s*\[.*?\]',
+                r'\{[^{}]*"big_chunks"[^{}]*\[.*?\]\s*\}'
+            ]
+            
+            best_match = None
+            for pattern in patterns:
+                matches = re.findall(pattern, page_source, re.DOTALL)
+                if matches:
+                    # Get the longest match
+                    longest = max(matches, key=len)
+                    if len(longest) > len(best_match or ''):
+                        best_match = longest
+            
+            if best_match:
+                decoded = html.unescape(best_match)
+                methods['Method 5'] = {
+                    'length': len(decoded),
+                    'content': decoded,
+                    'valid_json': is_valid_json(decoded)
+                }
+                st.write(f"   Found content: {len(decoded)} chars")
+            else:
+                methods['Method 5'] = {'error': 'No JSON pattern found in page source'}
+                st.write("   ❌ No JSON pattern found")
+        else:
+            methods['Method 5'] = {'error': 'No big_chunks found in page source'}
+            st.write("   ❌ No big_chunks found in page source")
+            
+    except Exception as e:
+        methods['Method 5'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    # Method 6: Wait and retry approach
+    st.write("\n**Method 6: Multiple attempts with micro-delays**")
+    try:
+        copy_button = driver.find_element(By.CSS_SELECTOR, '[data-testid="stCodeCopyButton"]')
+        
+        attempts = []
+        for i in range(5):  # 5 attempts with small delays
+            if i > 0:
+                time.sleep(0.5)  # 500ms between attempts
+            
+            raw_content = copy_button.get_attribute('data-clipboard-text')
+            if raw_content:
+                decoded = html.unescape(raw_content)
+                attempts.append({
+                    'attempt': i + 1,
+                    'length': len(decoded),
+                    'valid': is_valid_json(decoded)
                 })
         
-        progress_bar.progress(1.0)
-        status_placeholder.success("✅ All timing tests completed!")
-        return results
-        
+        if attempts:
+            # Find the best attempt (longest valid JSON)
+            valid_attempts = [a for a in attempts if a['valid']]
+            if valid_attempts:
+                best = max(valid_attempts, key=lambda x: x['length'])
+                # Get the content from the best attempt
+                time.sleep(0.5 * (best['attempt'] - 1))
+                final_content = html.unescape(copy_button.get_attribute('data-clipboard-text'))
+                
+                methods['Method 6'] = {
+                    'attempts': attempts,
+                    'best_attempt': best['attempt'],
+                    'length': len(final_content),
+                    'content': final_content,
+                    'valid_json': True
+                }
+                st.write(f"   Best result: attempt {best['attempt']} with {len(final_content)} chars")
+            else:
+                methods['Method 6'] = {
+                    'attempts': attempts,
+                    'error': 'No valid JSON in any attempt'
+                }
+                st.write(f"   ❌ No valid JSON in {len(attempts)} attempts")
+        else:
+            methods['Method 6'] = {'error': 'No content found in any attempt'}
+            st.write("   ❌ No content found in any attempt")
+            
     except Exception as e:
-        status_placeholder.error(f"❌ Testing failed: {e}")
-        return []
+        methods['Method 6'] = {'error': str(e)}
+        st.write(f"   ❌ Error: {e}")
+    
+    return methods
 
-def run_timing_test(url, content, test_delays):
-    """Run the complete timing test"""
-    
-    # Create UI elements
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        status_placeholder = st.empty()
-        log_placeholder = st.empty()
-    
-    with col2:
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
-    
-    results = {
-        'url': url,
-        'content_length': len(content),
-        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'copy_button_time': None,
-        'endpoint_requests': 0,
-        'timing_results': [],
-        'optimal_delay': None,
-        'success': False
-    }
-    
-    # Setup driver
-    status_placeholder.info("🔧 Setting up Chrome driver...")
-    driver, error = setup_test_driver()
-    
-    if not driver:
-        status_placeholder.error(f"❌ Driver setup failed: {error}")
-        return results
-    
+def is_valid_json(content):
+    """Check if content is valid JSON"""
     try:
-        # Navigate to chunk.dejan.ai
-        status_placeholder.info("🌐 Navigating to chunk.dejan.ai...")
-        driver.get("https://chunk.dejan.ai/")
-        time.sleep(5)
-        
-        # Find and fill input
-        status_placeholder.info("📝 Finding input field...")
-        wait = WebDriverWait(driver, 30)
-        input_field = wait.until(EC.presence_of_element_located((By.ID, "text_area_1")))
-        input_field.clear()
-        input_field.send_keys(content[:3000])  # Limit content for faster testing
-        
-        # Click submit
-        status_placeholder.info("🚀 Clicking submit button...")
-        submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
-        submit_button.click()
-        
-        # Monitor network activity
-        success, copy_button_time, endpoint_requests = monitor_network_activity(driver, status_placeholder, log_placeholder)
-        
-        results['copy_button_time'] = copy_button_time
-        results['endpoint_requests'] = endpoint_requests
-        
-        if not success:
-            return results
-        
-        # Test extraction timing
-        timing_results = test_extraction_timing(driver, test_delays, progress_bar, status_placeholder)
-        results['timing_results'] = timing_results
-        
-        # Find optimal delay
-        valid_results = [r for r in timing_results if r['valid_json']]
-        if valid_results:
-            optimal = max(valid_results, key=lambda x: x['length'])
-            results['optimal_delay'] = optimal['delay']
-            results['success'] = True
-        
-        return results
-        
-    except Exception as e:
-        status_placeholder.error(f"❌ Test failed: {e}")
-        return results
+        json.loads(content)
+        return True
+    except:
+        return False
+
+def analyze_methods(methods):
+    """Analyze which method works best"""
+    st.write("\n📊 **ANALYSIS RESULTS**")
+    st.write("=" * 50)
     
-    finally:
-        if driver:
-            driver.quit()
+    valid_methods = {}
+    for method_name, result in methods.items():
+        if 'content' in result and result.get('valid_json', False):
+            valid_methods[method_name] = result
+    
+    if not valid_methods:
+        st.write("❌ **NO VALID JSON FOUND WITH ANY METHOD**")
+        st.write("\n🔍 Debug info:")
+        for method_name, result in methods.items():
+            if 'error' in result:
+                st.write(f"   {method_name}: {result['error']}")
+            elif 'content' in result:
+                st.write(f"   {method_name}: {len(result['content'])} chars, valid: {result.get('valid_json', False)}")
+        return None
+    
+    # Find the best method (most content)
+    best_method = max(valid_methods.keys(), key=lambda k: len(valid_methods[k]['content']))
+    best_result = valid_methods[best_method]
+    
+    st.write(f"🎯 **BEST METHOD: {best_method}**")
+    st.write(f"📏 Content length: {len(best_result['content'])} characters")
+    
+    if 'raw_length' in best_result:
+        st.write(f"📄 Raw vs Decoded: {best_result['raw_length']} → {best_result['decoded_length']}")
+    
+    # Show all valid methods comparison
+    st.write(f"\n📈 **ALL VALID METHODS:**")
+    for method_name in sorted(valid_methods.keys()):
+        result = valid_methods[method_name]
+        st.write(f"   {method_name}: {len(result['content'])} characters")
+    
+    # Show a preview of the best content
+    st.write(f"\n📋 **PREVIEW OF BEST RESULT:**")
+    preview = best_result['content'][:500] + "..." if len(best_result['content']) > 500 else best_result['content']
+    st.code(preview, language='json')
+    
+    return best_method, best_result
 
 def main():
     """Main app interface"""
-    st.title("🧪 Selenium Timing Test App")
-    st.markdown("**Find the optimal delay for extracting complete JSON from chunk.dejan.ai**")
+    st.title("🔍 JSON Extraction Methods Test")
+    st.markdown("**Test different ways to extract complete JSON from stCodeCopyButton**")
+    st.markdown("Focus: EXTRACTION METHODS (not timing)")
     st.markdown("---")
     
-    # Sidebar controls
-    with st.sidebar:
-        st.header("⚙️ Test Configuration")
-        
-        # Test delays
-        st.subheader("Timing Intervals")
-        delay_preset = st.selectbox(
-            "Choose preset delays:",
-            ["Quick Test (0-10s)", "Comprehensive (0-20s)", "Extended (0-30s)", "Custom"]
-        )
-        
-        if delay_preset == "Quick Test (0-10s)":
-            test_delays = [0, 1, 2, 3, 5, 8, 10]
-        elif delay_preset == "Comprehensive (0-20s)":
-            test_delays = [0, 1, 2, 3, 5, 8, 10, 15, 20]
-        elif delay_preset == "Extended (0-30s)":
-            test_delays = [0, 1, 2, 3, 5, 8, 10, 15, 20, 25, 30]
-        else:
-            custom_delays = st.text_input("Custom delays (comma-separated):", "0,1,2,3,5,8,10")
-            try:
-                test_delays = [int(x.strip()) for x in custom_delays.split(',')]
-            except:
-                test_delays = [0, 1, 2, 3, 5, 8, 10]
-        
-        st.write(f"Testing delays: {test_delays}")
-        
-        # Clear results
-        if st.button("🗑️ Clear All Results"):
-            st.session_state.test_results = []
-            st.rerun()
-    
-    # Main interface
+    # URL input
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("📝 URL to Test")
         url = st.text_input(
-            "Enter URL:",
+            "URL to test:",
             placeholder="https://example.com/article",
-            help="URL to extract content from for testing"
+            help="URL to extract content from (will be processed by chunk.dejan.ai)"
         )
         
-        # Run test button
-        if st.button("🚀 Run Timing Test", type="primary", use_container_width=True):
+        if st.button("🧪 Test Extraction Methods", type="primary", use_container_width=True):
             if not url:
-                st.error("Please enter a URL to test")
+                st.error("Please enter a URL")
             else:
-                with st.spinner("Extracting content..."):
-                    success, content, error = extract_content_for_testing(url)
-                    
-                if not success:
-                    st.error(f"Content extraction failed: {error}")
-                else:
-                    st.success(f"Content extracted: {len(content)} characters")
-                    
-                    with st.spinner("Running timing test..."):
-                        st.session_state.current_test = run_timing_test(url, content, test_delays)
-                        st.session_state.test_results.append(st.session_state.current_test)
-                    
-                    st.rerun()
+                test_extraction_methods_workflow(url)
     
     with col2:
-        st.subheader("ℹ️ How it works")
-        st.markdown("""
-        1. **Extract** content from URL
-        2. **Submit** to chunk.dejan.ai  
-        3. **Monitor** for copy button
-        4. **Test** extraction at different delays
-        5. **Find** optimal timing
+        st.info("""
+        **What this tests:**
+        - getAttribute methods
+        - JavaScript execution  
+        - Multiple attributes
+        - Element text content
+        - Page source extraction
+        - Retry strategies
         """)
-        
-        if test_delays:
-            st.info(f"Will test {len(test_delays)} different delays: {min(test_delays)}s to {max(test_delays)}s")
+
+def test_extraction_methods_workflow(url):
+    """Run the complete extraction methods test"""
     
-    # Results section
-    if st.session_state.current_test and st.session_state.current_test['success']:
-        st.markdown("---")
-        st.subheader("📊 Latest Test Results")
-        
-        result = st.session_state.current_test
-        
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Copy Button Time", f"{result['copy_button_time']:.1f}s")
-        with col2:
-            st.metric("Endpoint Requests", result['endpoint_requests'])
-        with col3:
-            st.metric("Optimal Delay", f"{result['optimal_delay']}s")
-        with col4:
-            valid_count = len([r for r in result['timing_results'] if r['valid_json']])
-            st.metric("Valid Results", f"{valid_count}/{len(result['timing_results'])}")
-        
-        # Detailed results table
-        st.subheader("📋 Timing Test Results")
-        df = pd.DataFrame(result['timing_results'])
-        df['Status'] = df['valid_json'].apply(lambda x: '✅' if x else '❌')
-        df = df[['delay', 'Status', 'length', 'big_chunks', 'small_chunks', 'error']]
-        df.columns = ['Delay (s)', 'Valid', 'JSON Length', 'Big Chunks', 'Small Chunks', 'Error']
-        
-        st.dataframe(df, use_container_width=True)
-        
-        # Recommendation
-        if result['optimal_delay'] is not None:
-            st.success(f"🎯 **Recommendation**: Use {result['optimal_delay']} seconds delay after copy button appears")
-        else:
-            st.error("❌ No valid JSON found at any timing")
+    # Extract content
+    with st.spinner("Extracting content..."):
+        content = extract_content_simple(url)
     
-    # Historical results
-    if len(st.session_state.test_results) > 1:
-        st.markdown("---")
-        st.subheader("📈 Historical Results")
-        
-        history_data = []
-        for test in st.session_state.test_results:
-            if test['success']:
-                history_data.append({
-                    'Timestamp': test['timestamp'],
-                    'URL': test['url'][:50] + '...',
-                    'Copy Button Time': f"{test['copy_button_time']:.1f}s",
-                    'Optimal Delay': f"{test['optimal_delay']}s",
-                    'Endpoint Requests': test['endpoint_requests']
-                })
-        
-        if history_data:
-            history_df = pd.DataFrame(history_data)
-            st.dataframe(history_df, use_container_width=True)
+    st.success(f"Content ready: {len(content)} characters")
+    
+    # Setup and run test
+    with st.spinner("Setting up browser..."):
+        driver = setup_driver()
+    
+    try:
+        with st.spinner("Processing with chunk.dejan.ai..."):
+            # Navigate and submit
+            driver.get("https://chunk.dejan.ai/")
+            time.sleep(5)
             
-            # Download results
-            if st.button("💾 Download All Results"):
-                import csv
-                import io
-                
-                output = io.StringIO()
-                writer = csv.writer(output)
-                writer.writerow(['timestamp', 'url', 'copy_button_time', 'optimal_delay', 'endpoint_requests'])
-                
-                for test in st.session_state.test_results:
-                    if test['success']:
-                        writer.writerow([
-                            test['timestamp'], test['url'], test['copy_button_time'], 
-                            test['optimal_delay'], test['endpoint_requests']
-                        ])
-                
-                st.download_button(
-                    "📥 Download CSV",
-                    output.getvalue(),
-                    "timing_test_results.csv",
-                    "text/csv"
-                )
+            # Fill form
+            wait = WebDriverWait(driver, 30)
+            input_field = wait.until(EC.presence_of_element_located((By.ID, "text_area_1")))
+            input_field.clear()
+            input_field.send_keys(content)
+            
+            submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
+            submit_button.click()
+            
+            # Wait for processing (4th fetch + 1 second)
+            processing_complete = wait_for_processing_simple(driver)
+            
+            if not processing_complete:
+                st.error("❌ Processing timeout - copy button never appeared")
+                return
+        
+        st.success("✅ Processing complete - testing extraction methods...")
+        
+        # Test all extraction methods
+        methods = test_extraction_methods(driver)
+        
+        # Analyze results
+        result = analyze_methods(methods)
+        
+        if result:
+            method_name, best_result = result
+            st.success(f"🎉 **WINNER: {method_name}** successfully extracted {len(best_result['content'])} characters!")
+            
+            # Offer to download the result
+            st.download_button(
+                "💾 Download Best Result JSON",
+                best_result['content'],
+                f"extracted_json_{int(time.time())}.json",
+                "application/json"
+            )
+        else:
+            st.error("❌ No method successfully extracted valid JSON")
+            st.info("💡 Try a different URL or check the chunk.dejan.ai processing")
+    
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
     main()
