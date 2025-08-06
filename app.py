@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Content Processing Automation Project - Final Logic with Re-Find Loop
+Content Processing Automation Project - Final Logic
 
 Purpose:
-This script handles arbitrarily large content by sending it in chunks and
-re-finding the input element before sending each chunk. This prevents
-StaleElementReferenceExceptions on dynamic web pages.
+This version waits for elements to be fully interactable before trying to
+type into them, preventing ElementNotInteractableException caused by overlays.
 """
 
 import streamlit as st
@@ -35,9 +34,6 @@ st.markdown("Enter a URL to scrape its content, process it, and extract the resu
 
 # --- Component 1: The Original Content Extractor Class ---
 class ContentExtractor:
-    """
-    Handles content extraction from websites using the exact logic from the JavaScript bookmarklet.
-    """
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
@@ -54,13 +50,10 @@ class ContentExtractor:
             main_container = None
             for selector in main_container_selectors:
                 main_container = soup.select_one(selector)
-                if main_container:
-                    break
+                if main_container: break
             if not main_container:
-                if len(soup.find_all('p')) > 3:
-                    main_container = soup.find_all('p')[0].parent
-                else:
-                    main_container = soup.body
+                if len(soup.find_all('p')) > 3: main_container = soup.find_all('p')[0].parent
+                else: main_container = soup.body
             for h1 in soup.find_all('h1'):
                 text = h1.get_text(separator='\n', strip=True)
                 if text: content_parts.append(f'H1: {text}')
@@ -89,8 +82,7 @@ def setup_driver():
     try:
         return webdriver.Chrome(options=get_stable_chrome_options())
     except WebDriverException as e:
-        st.error(f"❌ WebDriver Initialization Failed: {e}")
-        return None
+        st.error(f"❌ WebDriver Initialization Failed: {e}"); return None
 
 def extract_from_button_attribute(driver, log_callback):
     try:
@@ -101,8 +93,7 @@ def extract_from_button_attribute(driver, log_callback):
         log_callback("✅ Results section is visible.")
         button_selector = "button[data-testid='stCodeCopyButton']"
         log_callback("...Waiting for the copy button...")
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, button_selector)))
-        copy_button = driver.find_element(By.CSS_SELECTOR, button_selector)
+        copy_button = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, button_selector)))
         log_callback("✅ Found the copy button element.")
         log_callback("...Polling button attribute for completeness...")
         timeout = time.time() + 10
@@ -110,8 +101,7 @@ def extract_from_button_attribute(driver, log_callback):
         while time.time() < timeout:
             raw_content = copy_button.get_attribute('data-clipboard-text')
             if raw_content and raw_content.strip().startswith('{') and raw_content.strip().endswith('}'):
-                final_content = raw_content
-                break
+                final_content = raw_content; break
             time.sleep(0.2)
         if not final_content:
             log_callback("❌ Timed out polling the attribute."); return None
@@ -120,8 +110,7 @@ def extract_from_button_attribute(driver, log_callback):
         log_callback(f"✅ Extraction complete. Retrieved {len(decoded_content):,} characters.")
         return decoded_content
     except Exception as e:
-        log_callback(f"❌ An error occurred during extraction: {e}")
-        return None
+        log_callback(f"❌ An error occurred during extraction: {e}"); return None
 
 def main_workflow(url):
     driver = None
@@ -152,23 +141,22 @@ def main_workflow(url):
         driver.get("https://chunk.dejan.ai/")
         wait = WebDriverWait(driver, 20)
         
-        # --- NEW "RE-FIND LOOP" LOGIC ---
         log_callback("Pasting content using robust 'Re-Find' loop method...")
         chunk_size = 500
         content_chunks = [content_to_submit[i:i + chunk_size] for i in range(0, len(content_to_submit), chunk_size)]
         
-        # Clear the field once at the beginning
-        input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')))
+        textarea_selector = (By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')
+        input_field = wait.until(EC.element_to_be_clickable(textarea_selector))
         input_field.clear()
 
         for i, chunk in enumerate(content_chunks):
-            # For every chunk, re-find the element to get a fresh reference
-            input_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]')))
+            # --- THIS IS THE CORRECTED SECTION ---
+            # For every chunk, wait until the element is not covered by a spinner and is ready for input.
+            input_field = wait.until(EC.element_to_be_clickable(textarea_selector))
             input_field.send_keys(chunk)
             log_callback(f"...Sent chunk {i+1}/{len(content_chunks)}")
         
         log_callback("✅ Full content sent successfully.")
-
         log_callback("Clicking submit button...")
         submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]')))
         submit_button.click()
