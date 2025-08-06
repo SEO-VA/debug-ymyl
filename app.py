@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Content Processing Automation Project - Final Logic
+Content Processing Automation Project - 5-Chunk Limit Test
 
 Purpose:
-This version includes a try...except block within the input loop to gracefully
-handle the ElementNotInteractableException, making the script resilient to
-intermittent loading overlays.
+This script tests the hypothesis that the target site has a 5-input limit.
+It dynamically calculates chunk sizes to send the entire content in exactly
+5 chunks, regardless of total length.
 """
 
 import streamlit as st
@@ -22,6 +22,7 @@ import time
 import html
 from datetime import datetime
 import pytz
+import math # Required for ceiling function to calculate chunk size
 
 # --- Streamlit Page Configuration ---
 st.set_page_config(page_title="Content Processor", page_icon="🚀", layout="wide")
@@ -97,49 +98,9 @@ def main_workflow(url):
         log_callback(f"Extracting content from: {url}")
         success, content_to_submit, error = extractor.extract_content(url)
         if not success: log_callback(f"🔥 FAILED to extract content: {error}"); return
-        log_callback(f"✅ Content extracted successfully ({len(content_to_submit):,} chars).")
+        
+        total_length = len(content_to_submit)
+        log_callback(f"✅ Content extracted successfully ({total_length:,} chars).")
         
         log_callback("Initializing browser..."); driver = setup_driver()
         if not driver: return
-        log_callback("Navigating to `chunk.dejan.ai`..."); driver.get("https://chunk.dejan.ai/"); wait = WebDriverWait(driver, 20)
-        
-        log_callback("Pasting content using resilient error-handling loop..."); chunk_size = 500
-        content_chunks = [content_to_submit[i:i + chunk_size] for i in range(0, len(content_to_submit), chunk_size)]
-        textarea_selector = (By.CSS_SELECTOR, 'textarea[aria-label="Text to chunk:"]'); input_field = wait.until(EC.element_to_be_clickable(textarea_selector)); input_field.clear()
-
-        for i, chunk in enumerate(content_chunks):
-            try:
-                # Step 1: Wait for the element to be clickable before every attempt
-                input_field = wait.until(EC.element_to_be_clickable(textarea_selector))
-                # Step 2: Try to send the text
-                input_field.send_keys(chunk)
-                log_callback(f"...Sent chunk {i+1}/{len(content_chunks)}")
-            except ElementNotInteractableException:
-                # Step 3: If blocked, catch the error, log it, wait, and let the loop retry.
-                log_callback(f"⚠️ Chunk {i+1} blocked by overlay. Pausing and will retry.")
-                time.sleep(1) # Wait for the overlay to disappear
-                continue # Go to the next loop iteration, which will re-run the wait
-        
-        log_callback("✅ Full content sent successfully.")
-        log_callback("Clicking submit button..."); submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="stBaseButton-secondary"]'))); submit_button.click()
-        
-        extracted_content = extract_from_button_attribute(driver, log_callback)
-
-        if extracted_content:
-            st.success("🎉 **Workflow Complete!**"); is_valid_json = json.loads(extracted_content) is not None
-            col1, col2 = st.columns(2); col1.metric("Characters Extracted", f"{len(extracted_content):,}"); col2.metric("Is Valid JSON?", "✅ Yes" if is_valid_json else "❌ No")
-            with st.expander("📋 View Extracted JSON", expanded=True): st.code(extracted_content, language='json')
-            st.download_button("💾 Download Full Extracted JSON", data=extracted_content, file_name="extracted_content.json", mime="application/json")
-        else:
-            st.error("🔥 **Workflow Failed.** See logs for details.")
-    except Exception as e:
-        log_callback(f"💥 An unexpected error occurred in the main workflow: {e}")
-    finally:
-        if driver: log_callback("Cleaning up and closing browser instance."); driver.quit(); log_callback("✅ Workflow finished.")
-
-# --- Streamlit UI ---
-st.subheader("Enter URL to Process")
-url_to_process = st.text_input("URL:", "https://www.casinohawks.com/bonuses/bonus-code", help="Enter a full URL of an article to scrape and process.")
-if st.button("🚀 Run Full Workflow", type="primary", use_container_width=True):
-    if url_to_process: st.subheader("📋 Real-time Processing Log"); main_workflow(url_to_process)
-    else: st.error("Please enter a URL to process.")
